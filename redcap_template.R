@@ -13,8 +13,6 @@ library(readxl, pos = "package:tidyverse")
 
 # attaches other needed packages
 library(redcapAPI)
-library(pander)
-library(xtable)
 
 #### Assigning file paths and API tokens ####
 local.docs.path <- file.path("~", "Documents") #user Documents folder
@@ -52,22 +50,30 @@ if(!exists("secret")) {
   }
 }
 
-options(tibble.print_max = 40, tibble.print_min = 20, tibble.width = Inf)
-panderOptions("table.split.table", Inf)
 
 #### Redcap Data Export ####
 options(redcap_api_url = 'https://redcap.partners.org/redcap/api/')
 rconn <- redcapConnection(token = secret)
+# export metadata bundle - automatically saved in options("redcap_bundle") - to access use getOption("redcap_bundle")
+exportBundle(rconn, return_object = F, users = F)
+# bundle contains a list of these dataframes:
+# meta_data: all variables with name, form, type, and various details
+# instruments: all forms with name and label
+# events: all events in project with name, arm number, and unique name
+# arms: all arms with name, number
+# mappings: map of arm numbers, unique events, and forms
+redcap_meta_data <- getOption("redcap_bundle")$meta_data
+redcap_data_map <- getOption("redcap_bundle")$mappings
 
-redcap_bundle <- exportBundle(rconn, return_object = T)
 raw_data_ <- exportRecords(rconn, factors = T, checkboxLabels = T, labels = F)
+export.date <- Sys.Date()
 
 # for all data, omit the forms and events arguments
 # for specific forms, use the argument 'forms = c("form_1", "form_2", etc.)'
 # for specific events, use the argument 'events = c("unique_event_name_1", "unique_event_name_1", etc.)'
-# to view the options, run > View(redcap_bundle$mappings)
+# to view the event and form options, run > View(redcap_data_map)
 
-
+#### ^^^^ Edited ^^^^ #####
 ####Data Cleaning and Prep ####
 var_rename <- as_tibble(screen_bundle$meta_data) %>% 
   mutate(select_choices_or_calculations = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_)) %>%
