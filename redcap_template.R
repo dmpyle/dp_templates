@@ -74,34 +74,3 @@ export.date <- Sys.Date()
 # to view the event and form options, run > View(redcap_data_map)
 
 #### ^^^^ Edited ^^^^ #####
-####Data Cleaning and Prep ####
-var_rename <- as_tibble(screen_bundle$meta_data) %>% 
-  mutate(select_choices_or_calculations = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_)) %>%
-  separate_rows(select_choices_or_calculations, sep = ' \\| ') %>%
-  separate(col = select_choices_or_calculations, into = c("choice_num", "new_name"), sep = ', ') %>%
-  mutate(new_name = if_else(field_name == "qualifying_allergens", str_c(new_name, "_allergic"), new_name)) %>%
-  unite(col = "field_name", field_name, choice_num, na.rm = TRUE, sep = "___") %>%
-  mutate(new_name = case_when(!is.na(new_name) ~ new_name,
-                              field_name == "spt" ~ "peanut_spt",
-                              field_name == "peanut_sige" ~ "peanut_ige",
-                              TRUE ~ field_name)) %>%
-  select(new_name, field_name) %>%
-  deframe()
-
-var_rename <- redcap_bundle$meta_data %>% 
-  mutate(select_choices_or_calculations = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_)) %>%
-  separate_rows(select_choices_or_calculations, sep = ' \\| ') %>% 
-  separate(col = select_choices_or_calculations, into = c("choice_num", "new_name"), sep = ', ', extra = "merge", fill = "right") %>% 
-  unite(col = "field_name", field_name, choice_num, na.rm = TRUE, sep = "___") %>%
-  select(new_name, field_name) %>%
-  deframe()
-
-tidy_log <- as_tibble(screen_log_raw) %>% rename(!!var_rename) %>%
-  mutate(across(ends_with("_allergic"), ~as.character(fct_recode(., NULL = "")))) %>%
-  unite("reported_allergens", ends_with("_allergic"), -starts_with("treenuts"), sep = ";", remove = F, na.rm = T) %>%
-  mutate(n_reported = str_count(reported_allergens, boundary("word"))) %>%
-  mutate(across(ends_with("_allergic"), ~!is.na(.))) %>%
-  mutate(across(where(is.POSIXt), as_date)) %>%
-  mutate(across(c(ends_with("spt"), ends_with("ige")), parse_number, na = c("", "NA", "pending"))) %>%
-  mutate(across(c(ends_with("spt"), ends_with("ige")), round, 8))
-
