@@ -10,9 +10,13 @@ library(magrittr, pos = "package:tidyverse")
 library(glue, pos = "package:tidyverse")
 library(lubridate, pos = "package:tidyverse")
 library(readxl, pos = "package:tidyverse")
+library(naniar, pos = "package:tidyverse")
 
 # attaches other needed packages
 library(redcapAPI)
+
+# print options setting
+options(tibble.print_min = 20, tibble.print_max = 40)
 
 #### Assigning file paths and API tokens ####
 local.docs.path <- file.path("~", "Documents") #user Documents folder
@@ -62,15 +66,48 @@ exportBundle(rconn, return_object = F, users = F)
 # events: all events in project with name, arm number, and unique name
 # arms: all arms with name, number
 # mappings: map of arm numbers, unique events, and forms
-redcap_meta_data <- getOption("redcap_bundle")$meta_data
-redcap_data_map <- getOption("redcap_bundle")$mappings
+redcap_meta_data <- getOption("redcap_bundle")$meta_data 
+redcap_data_map <- getOption("redcap_bundle")$mappings %>%
+  left_join(select(getOption("redcap_bundle")$meta_data, form = form_name, field_name), by = "form")
+
+select(getOption("redcap_bundle")$meta_data, form = form_name, field_name)
+
+as_tibble(getOption("redcap_bundle")$meta_data) %>%
+  select(form_name, field_name, field_type, select_choices_or_calculations) %>%
+  mutate(single_select_choices = if_else(field_type %in% c("radio", "dropdown"), select_choices_or_calculations, NA_character_),
+         multiple_select_choices = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_),
+         calculation = if_else(field_type %in% c("calc"), select_choices_or_calculations, NA_character_), 
+         select_choices_or_calculations = NULL) %>%
+  separate_rows(choices, sep = "\\s\\|\\s") %>%  
+  separate(choices, into = c("choice_num", "choice_value"), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge")
+  
+
+as_tibble(getOption("redcap_bundle")$meta_data) %>%
+  mutate(checkbox_choices = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_)) %>% 
+  separate_rows(checkbox_choices, sep = "\\s\\|\\s") %>%
+  separate(checkbox_choices, c("choice_id", NULL), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge") %>%
+  unite(col = field_name, field_name, choice_id, sep = "___", na.rm = T) %>%
+  select(form = form_name, variable = field_name) %>% 
+  chop(variable) %>%
+  inner_join(x = getOption("redcap_bundle")$mappings)
+mutate(across(vars, ~map(.x, append, paste0(form_name, "_complete"))))
+
+
+as_tibble(getOption("redcap_bundle")$meta_data) %>%
+  mutate(select_choices = if_else(field_type %in% c("radio", "checkbox", "dropdown"), select_choices_or_calculations, NA_character_),
+         calculation = if_else(field_type %in% c("calc"), select_choices_or_calculations, NA_character_)) %>%
+  separate_rows(select_choices, sep = "\\s\\|\\s") %>%  
+  separate(select_choices, into = c("id", "value"), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge") %>%
+  mutate(field_name = if_else(field_type == "checkbox", paste(field_name, id, sep = "___"), field_name)) %>%
+  nest(select_choices = c(id, value)) %>%
+  mutate(select_choices = set_names(select_choices, field_name))
 
 raw_data_ <- exportRecords(rconn, factors = T, checkboxLabels = T, labels = F)
 export.date <- Sys.Date()
 
 # for all data, omit the forms and events arguments
-# for specific forms, use the argument 'forms = c("form_1", "form_2", etc.)'
-# for specific events, use the argument 'events = c("unique_event_name_1", "unique_event_name_1", etc.)'
+# for specific forms, add the argument 'forms = c("form_1", "form_2", etc.)'
+# for specific events, add the argument 'events = c("unique_event_name_1", "unique_event_name_1", etc.)'
 # to view the event and form options, run > View(redcap_data_map)
 
 #### ^^^^ Edited ^^^^ #####
