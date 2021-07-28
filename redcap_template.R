@@ -18,9 +18,10 @@ library(redcapAPI)
 # print options setting
 options(tibble.print_min = 20, tibble.print_max = 40)
 
-#### Assigning file paths and API tokens ####
+#### Assigning file paths ####
 local.docs.path <- file.path("~", "Documents") #user Documents folder
 local.db.path <- file.path("~", "Dropbox (Partners HealthCare)") #usual location for dropbox in Shrefflab
+
 #checking that local.db.path exists and if not, searching 1 layer of subdirectories to find it
 if(!dir.exists(local.db.path)) {
   for (subdir in list.dirs("~", recursive = F)) {
@@ -36,6 +37,9 @@ output.path <- file.path(local.db.path,
                          # insert directory path here
 )
 
+if (!dir.exists(output.path)) {stop("Could not set the read/write path. Please check that your designated output folder exists")}
+
+#### User-specific API tokens ####
 switch(Sys.info()[['user']],
        # add usernames and API_token paths here
        stop("No API token found. Run the next section of code to find it.")
@@ -54,54 +58,63 @@ if(!exists("secret")) {
   }
 }
 
-
 #### Redcap Data Export ####
 options(redcap_api_url = 'https://redcap.partners.org/redcap/api/')
 rconn <- redcapConnection(token = secret)
-# export metadata bundle - automatically saved in options("redcap_bundle") - to access use getOption("redcap_bundle")
-exportBundle(rconn, return_object = F, users = F)
+# export metadata bundle - automatically saved in options("redcap_bundle")
+exportBundle(rconn, users = F, version = F)
+# to access bundle use getOption("redcap_bundle") or save to a variable with argument return_object = T in exportBundle function
+redcap <- getOption("redcap_bundle") %>% 
+  compact() %>% 
+  map(as_tibble)
 # bundle contains a list of these dataframes:
 # meta_data: all variables with name, form, type, and various details
 # instruments: all forms with name and label
 # events: all events in project with name, arm number, and unique name
 # arms: all arms with name, number
-# mappings: map of arm numbers, unique events, and forms
-redcap_meta_data <- getOption("redcap_bundle")$meta_data 
-redcap_data_map <- getOption("redcap_bundle")$mappings %>%
-  left_join(select(getOption("redcap_bundle")$meta_data, form = form_name, field_name), by = "form")
+# mappings: map of associations of arms, events, and forms
 
-select(getOption("redcap_bundle")$meta_data, form = form_name, field_name)
+# map choices from selectable choice variables and save to bundle
+redcap$choices <- redcap$meta_data %>%
+  mutate(choices = case_when(field_type == "calc" ~ NA_character_,
+                             field_type == "yesno" ~ "1, Yes | 0, No", 
+                             field_type == "truefalse" ~ "1, TRUE | 0, FALSE",
+                             TRUE ~ select_choices_or_calculations)) %>%
+  mutate(across(choices, ~map(.x, as_tibble))) %>%
+  mutate(across(choices, ~map(.x, separate_rows, value, sep = "\\s\\|\\s"))) %>%
+  mutate(across(choices, ~map(.x, separate, value, into = c("id", "value"), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge"))) %>%
+  mutate(across(choices, ~map(.x, deframe))) %>% 
+  mutate(across(choices, ~set_names(.x, field_name))) %>%
+  pull(choices)
+# to see choices or use in later code: redcap$choices$[var_name]
 
-as_tibble(getOption("redcap_bundle")$meta_data) %>%
-  select(form_name, field_name, field_type, select_choices_or_calculations) %>%
-  mutate(single_select_choices = if_else(field_type %in% c("radio", "dropdown"), select_choices_or_calculations, NA_character_),
-         multiple_select_choices = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_),
-         calculation = if_else(field_type %in% c("calc"), select_choices_or_calculations, NA_character_), 
-         select_choices_or_calculations = NULL) %>%
-  separate_rows(choices, sep = "\\s\\|\\s") %>%  
-  separate(choices, into = c("choice_num", "choice_value"), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge")
-  
-
-as_tibble(getOption("redcap_bundle")$meta_data) %>%
-  mutate(checkbox_choices = if_else(field_type == "checkbox", select_choices_or_calculations, NA_character_)) %>% 
-  separate_rows(checkbox_choices, sep = "\\s\\|\\s") %>%
-  separate(checkbox_choices, c("choice_id", NULL), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge") %>%
-  unite(col = field_name, field_name, choice_id, sep = "___", na.rm = T) %>%
-  select(form = form_name, variable = field_name) %>% 
-  chop(variable) %>%
-  inner_join(x = getOption("redcap_bundle")$mappings)
-mutate(across(vars, ~map(.x, append, paste0(form_name, "_complete"))))
-
-
-as_tibble(getOption("redcap_bundle")$meta_data) %>%
-  mutate(select_choices = if_else(field_type %in% c("radio", "checkbox", "dropdown"), select_choices_or_calculations, NA_character_),
-         calculation = if_else(field_type %in% c("calc"), select_choices_or_calculations, NA_character_)) %>%
-  separate_rows(select_choices, sep = "\\s\\|\\s") %>%  
-  separate(select_choices, into = c("id", "value"), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge") %>%
-  mutate(field_name = if_else(field_type == "checkbox", paste(field_name, id, sep = "___"), field_name)) %>%
+redcap$data_dictionary <- redcap$meta_data %>%
+  mutate(select_choices = if_else(field_type != "calc", select_choices_or_calculations, NA_character_),
+         calculations = if_else(field_type == "calc", select_choices_or_calculations, NA_character_), 
+         text_validation_type = if_else(field_type != "slider", text_validation_type_or_show_slider_number, NA_character_),
+         show_slider_number = if_else(field_type == "slider", text_validation_type_or_show_slider_number, NA_character_), 
+         select_choices_or_calculations = NULL, text_validation_type_or_show_slider_number = NULL,
+         .after = field_note) %>%
+  mutate(var_type = case_when(field_type %in% c("radio", "dropdown", "truefalse", "yesno") ~ "single_select",
+                              field_type == "checkbox" ~ "multi_select",
+                              TRUE ~ field_type), .after = section_header) %>%
+  mutate(select_choices = case_when(!is.na(select_choices) ~ select_choices,
+                                    field_type == "yesno" ~ "1, Yes | 0, No", 
+                                    field_type == "truefalse" ~ "1, TRUE | 0, FALSE")) %>%
+  mutate(field_type = case_when(is.na(text_validation_type) ~ field_type,
+                                is.na(text_validation_min) & is.na(text_validation_max) ~ text_validation_type,
+                                !is.na(text_validation_min) & is.na(text_validation_max) ~ 
+                                  paste0(text_validation_type, " (> ", text_validation_min, ")"),
+                                is.na(text_validation_min) & !is.na(text_validation_max) ~ 
+                                  paste0(text_validation_type, " (< ", text_validation_max, ")"),
+                                TRUE ~ paste0(text_validation_type, " (", text_validation_min, " - ", text_validation_max, ")"))) %>%
+  separate_rows(select_choices, sep = "\\s\\|\\s") %>%
+  separate(select_choices, into = c("id", "value"), sep = "(?<=\\d),\\s?", fill = "right") %>% 
+  mutate(field_name = if_else(var_type == "multi_select", paste(field_name, id, sep = "___"), field_name)) %>%
   nest(select_choices = c(id, value)) %>%
-  mutate(select_choices = set_names(select_choices, field_name))
-
+  select(form = form_name, field_name, var_type, field_type, field_label, select_choices, calculations, branching_logic, 
+         field_note, field_annotation)
+  
 raw_data_ <- exportRecords(rconn, factors = T, checkboxLabels = T, labels = F)
 export.date <- Sys.Date()
 
