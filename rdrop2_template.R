@@ -9,6 +9,17 @@ user.path <- switch(.Platform$OS.type, unix = {"~"},
                     Sys.getenv("HOME"))
 
 local.db.path <- file.path(user.path, "Dropbox (Partners HealthCare)")
+#checking that local.db.path exists and if not, searching 1 layer of subdirectories to find it
+if(!dir.exists(local.db.path)) {
+  for (subdir in list.dirs("~", recursive = F)) {
+    if(dir.exists(file.path(subdir, "Dropbox (Partners HealthCare)"))) {
+      local.db.path <- file.path(subdir, "Dropbox (Partners HealthCare)")
+      break
+    }
+  }
+  rm(subdir)
+}
+
 dbpath.projects <- file.path("Projects")
 
 #### Connect to dropbox and download/update source file ####
