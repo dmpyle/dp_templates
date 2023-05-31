@@ -41,7 +41,8 @@ if (!dir.exists(output.path)) {stop("Could not set the read/write path. Please c
 
 #### User-specific API tokens ####
 switch(Sys.info()[['user']],
-       # add usernames and API_token paths here
+       # add usernames and API_token paths here in the format below
+       # user123 = {secret <- readLines('/Users/user123/Documents/.../myAPItoken.txt', warn = FALSE)}
        stop("No API token found. Run the next section of code to find it.")
 )
 
