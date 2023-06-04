@@ -10,9 +10,9 @@ library(magrittr, pos = "package:tidyverse")
 library(glue, pos = "package:tidyverse")
 library(lubridate, pos = "package:tidyverse")
 library(readxl, pos = "package:tidyverse")
-library(naniar, pos = "package:tidyverse")
 
 # attaches other needed packages
+library(naniar, pos = "package:tidyverse")
 library(redcapAPI)
 
 # print options setting
@@ -41,8 +41,8 @@ if (!dir.exists(output.path)) {stop("Could not set the read/write path. Please c
 
 #### User-specific API tokens ####
 switch(Sys.info()[['user']],
-       # add usernames and API_token paths here in the format below
-       # user123 = {secret <- readLines('/Users/user123/Documents/.../myAPItoken.txt', warn = FALSE)}
+       # add usernames and API_token paths here in the format below (include the comma after each line)
+       # user123 = {secret <- readLines('/Users/user123/Documents/.../myAPItoken.txt', warn = FALSE)},
        stop("No API token found. Run the next section of code to find it.")
 )
 
@@ -59,11 +59,11 @@ if(!exists("secret")) {
   }
 }
 
-#### Redcap Data Export ####
+#### RedcapAPI Data Export ####
 options(redcap_api_url = 'https://redcap.partners.org/redcap/api/')
 rconn <- redcapConnection(token = secret)
 # export metadata bundle - automatically saved in options("redcap_bundle")
-exportBundle(rconn, users = F, version = F)
+exportBundle(rconn, users = F, version = F, return_object = F)
 # to access bundle use getOption("redcap_bundle") or save to a variable with argument return_object = T in exportBundle function
 redcap <- getOption("redcap_bundle") %>% 
   compact() %>% 
@@ -75,22 +75,55 @@ redcap <- getOption("redcap_bundle") %>%
 # arms: all arms with name, number
 # mappings: map of associations of arms, events, and forms
 
-# map choices from selectable choice variables and save to bundle
-redcap$choices <- redcap$meta_data %>%
-  mutate(choices = case_when(field_type == "calc" ~ NA_character_,
-                             field_type == "yesno" ~ "1, Yes | 0, No", 
-                             field_type == "truefalse" ~ "1, TRUE | 0, FALSE",
-                             TRUE ~ select_choices_or_calculations)) %>%
-  mutate(across(choices, ~map(.x, as_tibble))) %>%
-  mutate(across(choices, ~map(.x, separate_rows, value, sep = "\\s\\|\\s"))) %>%
-  mutate(across(choices, ~map(.x, separate, value, into = c("id", "value"), sep = "(?<=\\d),\\s?", fill = "right", extra = "merge"))) %>%
-  mutate(across(choices, ~map(.x, deframe))) %>% 
-  mutate(across(choices, ~set_names(.x, field_name))) %>%
-  pull(choices)
-# to see choices or use in later code: redcap$choices$[var_name]
+raw_data <- exportRecords(rconn, factors = T, checkboxLabels = T, labels = F) #deprecated soon (v2.7.0)
+raw_data_typed <- exportRecordsTyped(rconn) #coming soon (v2.7.0)
+export.date <- Sys.Date()
+# for all data, omit the forms and events arguments
+# for specific forms, add the argument 'forms = c("form_1", "form_2", etc.)'
+# for specific events, add the argument 'events = c("unique_event_name_1", "unique_event_name_1", etc.)'
+# to view the event and form options, run > View(redcap_data_map)
 
+#### Accessing without redcapAPI package #####
+redcap_ <- list(
+  meta_data = httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                       body = list(token=secret, format='json', returnFormat='json', content='metadata'))) %>% 
+    enframe(name = NULL) %>% unnest_wider(value),
+  instruments = httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                         body = list(token=secret, format='json', returnFormat='json', content='instrument'))) %>% 
+    enframe(name = NULL) %>% unnest_wider(value),
+  events = httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                    body = list(token=secret, format='json', returnFormat='json', content='event'))) %>% 
+    enframe(name = NULL) %>% unnest_wider(value),
+  arms = httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                  body = list(token=secret, format='json', returnFormat='json', content='arm'))) %>% 
+    enframe(name = NULL) %>% unnest_wider(value),
+  mappings = httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                      body = list(token=secret, format='json', returnFormat='json', content='formEventMapping'))) %>% 
+    enframe(name = NULL) %>% unnest_wider(value),
+  fieldnames = httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                        body = list(token=secret, format='json', returnFormat='json', content='exportFieldNames'))) %>% 
+    enframe(name = NULL) %>% unnest_wider(value)
+) %>%
+  map(replace_with_na_all, ~.x == "")
+
+raw_data_ <- httr::content(httr::POST(url = 'https://redcap.partners.org/redcap/api/', encode = "form", 
+                                      body = list(token=secret, format='json', returnFormat='json', content='record', action='export', 
+                                                  type='flat', csvDelimiter='', rawOrLabel='raw', rawOrLabelHeaders='raw', 
+                                                  exportCheckboxLabel='false', exportSurveyFields='true', exportDataAccessGroups='false'))) %>% 
+  enframe(name = NULL) %>% unnest_wider(value) #equivalent to exportRecords(rconn, factors = T, checkboxLabels = F, labels = F)
+# changable options:
+#   rawOrLabel = 'raw'(default) -or- 'label' --- raw or labeled values for select choices
+#   rawOrLabelHeaders = 'raw'(default) -or- 'label' --- include labels for checkbox options in col name
+#   exportCheckboxLabel = 'false'(default) -or- 'true' --- blank/1 vs "(Un)checked"
+#   exportSurveyFields = 'false'(default) -or- 'true' --- include survey timestamp/identifier fields if present
+#   exportDataAccessGroups = 'false'(default) -or- 'true' --- inclued data access group field if present
+
+#### Modify Bundle and Metadata ####
 redcap$data_dictionary <- redcap$meta_data %>%
-  mutate(select_choices = if_else(field_type != "calc", select_choices_or_calculations, NA_character_),
+  mutate(select_choices = case_when(field_type == "calc" ~ NA_character_,
+                                    field_type == "yesno" ~ "1, Yes | 0, No", 
+                                    field_type == "truefalse" ~ "1, TRUE | 0, FALSE",
+                                    TRUE ~ select_choices_or_calculations),
          calculations = if_else(field_type == "calc", select_choices_or_calculations, NA_character_), 
          text_validation_type = if_else(field_type != "slider", text_validation_type_or_show_slider_number, NA_character_),
          show_slider_number = if_else(field_type == "slider", text_validation_type_or_show_slider_number, NA_character_), 
@@ -99,29 +132,22 @@ redcap$data_dictionary <- redcap$meta_data %>%
   mutate(var_type = case_when(field_type %in% c("radio", "dropdown", "truefalse", "yesno") ~ "single_select",
                               field_type == "checkbox" ~ "multi_select",
                               TRUE ~ field_type), .after = section_header) %>%
-  mutate(select_choices = case_when(!is.na(select_choices) ~ select_choices,
-                                    field_type == "yesno" ~ "1, Yes | 0, No", 
-                                    field_type == "truefalse" ~ "1, TRUE | 0, FALSE")) %>%
-  mutate(field_type = case_when(is.na(text_validation_type) ~ field_type,
-                                is.na(text_validation_min) & is.na(text_validation_max) ~ text_validation_type,
-                                !is.na(text_validation_min) & is.na(text_validation_max) ~ 
+  mutate() %>%
+  mutate(field_type = case_when(!is.na(text_validation_min) & !is.na(text_validation_max) ~ 
+                                  paste0(text_validation_type, " (", text_validation_min, " - ", text_validation_max, ")"),
+                                !is.na(text_validation_min) & is.na(text_validation_max) ~
                                   paste0(text_validation_type, " (> ", text_validation_min, ")"),
-                                is.na(text_validation_min) & !is.na(text_validation_max) ~ 
+                                is.na(text_validation_min) & !is.na(text_validation_max) ~
                                   paste0(text_validation_type, " (< ", text_validation_max, ")"),
-                                TRUE ~ paste0(text_validation_type, " (", text_validation_min, " - ", text_validation_max, ")"))) %>%
+                                !is.na(text_validation_type) ~ text_validation_type,
+                                TRUE ~ field_type), text_validation_type = NULL, text_validation_min = NULL, text_validation_max = NULL) %>%
   separate_rows(select_choices, sep = "\\s\\|\\s") %>%
-  separate(select_choices, into = c("id", "value"), sep = "(?<=\\d),\\s?", fill = "right") %>% 
+  separate(select_choices, into = c("id", "value"), sep = "(?<=\\w),\\s?", fill = "right", extra = "merge") %>% 
   mutate(field_name = if_else(var_type == "multi_select", paste(field_name, id, sep = "___"), field_name)) %>%
   nest(select_choices = c(id, value)) %>%
-  select(form = form_name, field_name, var_type, field_type, field_label, select_choices, calculations, branching_logic, 
-         field_note, field_annotation)
+  select(form_name, field_name, var_type, field_type, field_label, select_choices, calculations, show_slider_number, branching_logic, field_note, field_annotation, section_header, required_field, identifier, matrix_group_name, matrix_ranking, question_number, custom_alignment)
   
-raw_data_ <- exportRecords(rconn, factors = T, checkboxLabels = T, labels = F)
-export.date <- Sys.Date()
-
-# for all data, omit the forms and events arguments
-# for specific forms, add the argument 'forms = c("form_1", "form_2", etc.)'
-# for specific events, add the argument 'events = c("unique_event_name_1", "unique_event_name_1", etc.)'
-# to view the event and form options, run > View(redcap_data_map)
-
-#### ^^^^ Edited ^^^^ #####
+redcap$choices <- redcap$data_dictionary$select_choices %>%
+  map(deframe)
+# map choices from selectable choice variables and save to bundle
+# to see choices or use in later code: redcap$choices$[var_name]
