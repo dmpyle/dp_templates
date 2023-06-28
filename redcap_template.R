@@ -140,14 +140,39 @@ redcap$data_dictionary <- redcap$meta_data %>%
                                 is.na(text_validation_min) & !is.na(text_validation_max) ~
                                   paste0(text_validation_type, " (< ", text_validation_max, ")"),
                                 !is.na(text_validation_type) ~ text_validation_type,
-                                TRUE ~ field_type), text_validation_type = NULL, text_validation_min = NULL, text_validation_max = NULL) %>%
-  separate_rows(select_choices, sep = "\\s\\|\\s") %>%
-  separate(select_choices, into = c("id", "value"), sep = "(?<=\\w),\\s?", fill = "right", extra = "merge") %>% 
+                                !is.na(select_choices) & select_choices == "1, Yes | 0, No" ~ "yesno",
+                                !is.na(select_choices) & select_choices == "1, True | 0, False" ~ "truefalse",
+                                TRUE ~ field_type), 
+         text_validation_type = NULL, text_validation_min = NULL, text_validation_max = NULL) %>%
+  separate_longer_delim(select_choices, delim = " | ") %>%
+  separate_wider_regex(select_choices, c(id = "^\\w+(?=,\\s)", "(?<=\\w),\\s(?=\\w)", value = "(?<=,\\s).+$")) %>% 
   mutate(field_name = if_else(var_type == "multi_select", paste(field_name, id, sep = "___"), field_name)) %>%
   nest(select_choices = c(id, value)) %>%
-  select(form_name, field_name, var_type, field_type, field_label, select_choices, calculations, show_slider_number, branching_logic, field_note, field_annotation, section_header, required_field, identifier, matrix_group_name, matrix_ranking, question_number, custom_alignment)
+  mutate(select_choices = set_names(select_choices, nm = field_name)) %>%
+  select(form_name, field_name, var_type, field_type, field_label, select_choices, calculations, show_slider_number, section_header, field_note, field_annotation, branching_logic, matrix_group_name, matrix_ranking, question_number, required_field, identifier, custom_alignment, -where(~all(is.na(.x))))
   
-redcap$choices <- redcap$data_dictionary$select_choices %>%
-  map(deframe)
+redcap$select_choices <- map(redcap$data_dictionary$select_choices, deframe)
 # map choices from selectable choice variables and save to bundle
 # to see choices or use in later code: redcap$choices$[var_name]
+
+##Validate Variable Types
+data_dictionary %>% select(field_name, field_type) %>%
+  mutate(var_class = data %>% select(field_name) %>% map_chr(class),
+         ideal_class = case_when(field_type %in% c("text", "email")  ~ "character", field_type == "date_mdy" ~ "Date", 
+                                 field_type %in% c("number", "calc") ~ "numeric",
+                                 field_type %in% c("radio", "dropdown") ~ "numeric/factor", 
+                                 field_type %in% c("yesno", "truefalse") ~ "logical")) %>%
+  chop(field_name) %>%
+  mutate(field_name = map_chr(field_name, str_flatten_comma))
+  # mutate(field_type = paste0(field_type, " (", var_class, " --> ", ideal_class, ")")) %>%
+  # select(field_name, field_type) %>% deframe()
+
+data %>% mutate(
+across(ends_with("_timestamp"), as_datetime),
+across(ends_with("_complete"), ~.x == 2),
+across(filter(data_dictionary, field_type == "yesno")$field_name, ~.x == 1),
+across(filter(data_dictionary, field_type == "date_mdy")$field_name, as_date),
+across(filter(data_dictionary, field_type == "calc")$field_name, as.numeric),
+across(filter(data_dictionary, field_type == "number")$field_name, as.numeric),
+across(filter(data_dictionary, field_type == "radio")$field_name, as.numeric)
+)
