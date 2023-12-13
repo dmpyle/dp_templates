@@ -1,15 +1,8 @@
 rm(list = ls())
 
 #### Loading Libraries ####
-while(!requireNamespace("tidyverse", quietly = T)) install.packages("tidyverse")
-
 # attaches tidyverse packages and commonly used supplements
-library(tidyverse) #readr, tidyr, dplyr, tibble, stringr, forcats, purrr, ggplot2
-library(rlang, pos = "package:tidyverse")
-library(magrittr, pos = "package:tidyverse")
-library(glue, pos = "package:tidyverse")
-library(lubridate, pos = "package:tidyverse")
-library(readxl, pos = "package:tidyverse")
+source("https://raw.githubusercontent.com/dmpyle/dp_templates/master/dmp_tidyverse.R")
 
 # attaches other needed packages
 library(naniar, pos = "package:tidyverse")

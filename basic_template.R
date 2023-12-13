@@ -1,6 +1,6 @@
 rm(list = ls())
 
-source("dmp_tidyverse.R")
+source("https://raw.githubusercontent.com/dmpyle/dp_templates/master/dmp_tidyverse.R")
 
 #### Designate filepaths and load files####
 user.path <- Sys.getenv("HOME")

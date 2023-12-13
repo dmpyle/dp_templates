@@ -1,6 +1,6 @@
 rm(list = ls())
 
-source("dmp_tidyverse.R")
+source("https://raw.githubusercontent.com/dmpyle/dp_templates/master/dmp_tidyverse.R")
 library(rdrop2)
 
 #### Designate filepaths and load files####
