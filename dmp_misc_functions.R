@@ -5,6 +5,17 @@ str_to_display <- compose(str_to_title, ~str_replace_all(.x, c('_' = ' ', '^n(?!
 
 sigdig <- function(num, sig) {format(num, digits = sig, nsmall = sig)}
 
+gcf <- function(a, b) {
+  #Greatest Common Factor
+  while(b != 0) {
+    new_a <- b
+    new_b <- a %% b
+    a <- new_a
+    b <- new_b
+  }
+  return(a)
+}
+
 formulator <- function(lhs, rhs = "1", type = c("each", "sum", "product")) {
   #Makes a formula object from the first 2 arguments
   #"lhs" argument is coerced to string and forms the left side of the formula
