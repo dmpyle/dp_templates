@@ -18,3 +18,4 @@ message(
 "Installed (if necessary) and loaded tidyverse packages (ggplot2, tibble, tidyr, readr, purrr, dplyr, stringr, forcats), 
  and supplements (magrittr, glue, readxl, broom, modelr, lubridate, reprex, rlang)"
 )
+
