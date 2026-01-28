@@ -45,6 +45,14 @@ formulator <- function(lhs, rhs = "1", type = c("each", "sum", "product")) {
   else return(formula_list[[1]])
 }
 
+createifnot.path <- function(path) {
+  if (!dir.exists(path)) {
+    dir.create(path)
+    message("designated path does not exist, created new folder in the specified location")
+  }
+  return(path)
+}
+
 list2df <- function(list, id_col = "id") {
   #converts a list to a tibble with list names as the first column named with the "id_col" argument
   suppressPackageStartupMessages({  
