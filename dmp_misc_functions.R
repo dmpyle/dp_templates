@@ -1,6 +1,5 @@
 
 ####Function definitions####
-str_to_snake <- compose(~str_replace_all(.x, c('\\s' = '_')), str_to_lower)
 str_to_display <- compose(str_to_title, ~str_replace_all(.x, c('_' = ' ', '^n(?!\\w)' = '# of')))
 
 sigdig <- function(num, sig) {format(num, digits = sig, nsmall = sig)}
